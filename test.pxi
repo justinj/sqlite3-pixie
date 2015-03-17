@@ -4,6 +4,8 @@
   (require pixie.string :as string)
   )
 
+; TODO: Make sure we are freeing the stuff from sqlite when we need to...
+
 (def libsqlite-name "/usr/lib/sqlite3/libtclsqlite3.dylib")
 (def libsqlite (ffi-library libsqlite-name))
 
@@ -13,7 +15,24 @@
   (f/defcfn sqlite3_open)
   ; last arg to exec is a buffer for errors, maybe useful
   (f/defcfn sqlite3_exec)
-  (f/defcfn sqlite3_close))
+  (f/defcfn sqlite3_close)
+
+  ; https://www.sqlite.org/c3ref/bind_parameter_index.html
+  (f/defcfn sqlite3_bind_parameter_count)
+  ; we SHOULDNT need sqlite_stmt struct, we should just have an opaque pointer (duh why was this
+  ; not obvious)
+
+  ; int sqlite3_prepare_v2(
+  ;   sqlite3 *db,            /* Database handle */
+  ;   const char *zSql,       /* SQL statement, UTF-8 encoded */
+  ;   int nByte,              /* Maximum length of zSql in bytes. */
+  ;   sqlite3_stmt **ppStmt,  /* OUT: Statement handle */
+  ;   const char **pzTail     /* OUT: Pointer to unused portion of zSql */
+  ; );
+  ; see https://www.sqlite.org/c3ref/prepare.html
+  (f/defcfn sqlite3_prepare_v2)
+  (f/defcfn sqlite3_errmsg)
+  )
 
 (defn make-map-of-call [argc argv cols]
   (into {}
@@ -47,7 +66,36 @@
 (defn sqlize-val [value]
   (pr-str value))
 
+; TODO: figure out an appropriate size for this
+(defn new-ptr []
+  (buffer 255))
+
+(defn deref-ptr [ptr]
+  (ffi/unpack ptr 0 CVoidP))
+; https://github.com/sparklemotion/sqlite3-ruby/blob/master/lib/sqlite3/statement.rb#L22
+; this is relevant for prepared statements
+; ruby calls into sqlite to bind parameters so I guess we should do the same
+
+(defn prepare-query [conn query & args]
+  (let [ptr (new-ptr)]
+    (sqlite3_prepare_v2
+      conn
+      query
+      -1 ; read up to the first null terminator
+      ptr
+      nil)
+  (prn "it is" (sqlite3_bind_parameter_count (deref-ptr ptr)))
+    )
+  ; (let [split (string/split query "?")]
+  ;   ; (prn split)
+  ;   split
+  ;   )
+  )
+
 (defn run-query [conn query & args]
+  (prn
+    (apply prepare-query conn query args)
+    )
   (let [query (reduce
                 (fn [query arg]
                   (let [replaced (string/replace-first query "?" (sqlize-val arg))]
@@ -59,5 +107,5 @@
     (run-raw-query conn query)))
 
 (let [conn (sqlite-connect "test.db")]
-  (prn (run-query conn     "select a from testtable where a = ?;" "poop"))
-  (prn (run-raw-query conn "select a from testtable where a = \"poop\";")))
+  (prn (run-query conn "select a from testtable where a = ?;" "poop"))
+  (comment prn (run-raw-query conn "select a from testtable where a = \"poop\";")))
