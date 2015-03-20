@@ -32,7 +32,52 @@
   ; see https://www.sqlite.org/c3ref/prepare.html
   (f/defcfn sqlite3_prepare_v2)
   (f/defcfn sqlite3_errmsg)
-  )
+
+
+  ; binding functions
+  ; 1st arg: pointer to statement
+  ; 2nd arg: index to be set
+  ; 3rd arg: value to bind
+  ; 4th arg: num bytes in parameter (if present), negative implies up to null terminator
+  ; TODO: ensure the stuff we pass in gets freed...
+  ; 5th arg (for blob and string): destructor
+  ; 6th arg: encoding for text64
+  (f/defcfn sqlite3_bind_int64)
+  
+  (f/defcfn sqlite3_step)
+
+  (f/defcfn sqlite3_column_bytes)
+  (f/defcfn sqlite3_column_type)
+  (f/defcfn sqlite3_column_count)
+  (f/defcfn sqlite3_column_text)
+  (f/defcfn sqlite3_column_text16)
+  (f/defcfn sqlite3_column_int64)
+
+  (f/defccallback sqlite3_destructor_type)
+  (f/defconst SQLITE_TRANSIENT)
+
+  (f/defconst SQLITE_ROW)
+  (f/defconst SQLITE_DONE)
+
+  (f/defconst SQLITE_INTEGER)
+  (f/defconst SQLITE_FLOAT)
+  (f/defconst SQLITE_TEXT)
+  (f/defconst SQLITE_BLOB)
+  (f/defconst SQLITE_NULL))
+
+
+(def sqlite3_bind_text (ffi/ffi-fn libsqlite "sqlite3_bind_text" [CVoidP CInt CCharP CInt CInt] CInt))
+
+(def column-type-name
+  {SQLITE_INTEGER "SQLITE_INTEGER"
+   SQLITE_FLOAT   "SQLITE_FLOAT"
+   SQLITE_TEXT    "SQLITE_TEXT"
+   SQLITE_BLOB    "SQLITE_BLOB"
+   SQLITE_NULL    "SQLITE_NULL"})
+
+(def no-op-type (ffi/ffi-callback [CVoidP] CVoidP))
+; TODO: this should somehow use SQLITE_TRANSIENT
+(def no-op (ffi/ffi-prep-callback sqlite3_destructor_type (fn [_] 0)))
 
 (defn make-map-of-call [argc argv cols]
   (into {}
@@ -55,13 +100,6 @@
     (sqlite3_open db-name conn)
     (ffi/unpack conn 0 CVoidP)))
 
-; TODO: check the connection is valid
-(defn run-raw-query [conn query]
-  (let [result (atom [])
-        set-result (make-setter-callback result)]
-    (sqlite3_exec conn query set-result nil nil)
-    @result))
-
 ; TODO: this should escape stuff
 (defn sqlize-val [value]
   (pr-str value))
@@ -69,6 +107,9 @@
 ; TODO: figure out an appropriate size for this
 (defn new-ptr []
   (buffer 255))
+
+(defn deref-str-ptr [ptr]
+  (ffi/unpack ptr 0 CCharP))
 
 (defn deref-ptr [ptr]
   (ffi/unpack ptr 0 CVoidP))
@@ -84,7 +125,20 @@
       -1 ; read up to the first null terminator
       ptr
       nil)
-  (prn "it is" (sqlite3_bind_parameter_count (deref-ptr ptr)))
+    (dotimes [i (count args)]
+      ; (sqlite3_bind_int64
+      ;   (deref-ptr ptr)
+      ;   (inc i) ; index to set
+      ;   (nth args i))
+      (sqlite3_bind_text
+        (deref-ptr ptr)
+        (inc i) ; index to set
+        (nth args i)
+        (count (nth args i))
+        -1
+        )
+      )
+    ptr
     )
   ; (let [split (string/split query "?")]
   ;   ; (prn split)
@@ -92,20 +146,51 @@
   ;   )
   )
 
+; TODO: check the connection is valid
+(defn run-raw-query [conn query]
+  (let [result (atom [])
+        set-result (make-setter-callback result)]
+    (sqlite3_exec conn query set-result nil nil)
+    @result))
+
+; 15:05 < justinjaffray> when doing ffi with pixie, is there a nice way to handle a function that returns a not-null-terminated string?
+; 15:10 < tbaldrid_> justinjaffray: if you define the function as returning a CVoidP, then you can use pixie.ffi/pack! and /unpack to read and write to data at that pointer.
+; 15:11 < tbaldrid_> e.g. (pixie.ffi/unpack ptr offset CUInt8)
+; 15:12 < tbaldrid_> that's pretty much the same as this C code: x = (char* ptr)[offset]
+
+(defn read-n-chars [ptr n]
+  (apply str (map #(char (ffi/unpack ptr % CUInt8))
+       (range 0 n))))
+
+(defmulti load-value #(sqlite3_column_type (deref-ptr %1) %2))
+
+(defmethod load-value SQLITE_TEXT
+  [statement column]
+  (let [size (sqlite3_column_bytes (deref-ptr statement) column)]
+    (read-n-chars (sqlite3_column_text (deref-ptr statement) column) size)))
+
+(defmethod load-value SQLITE_INTEGER
+  [statement column]
+  (sqlite3_column_int64 (deref-ptr statement) column))
+
+(defn get-row [conn statement]
+  (for [i (range 0 (sqlite3_column_count (deref-ptr statement)))]
+    (load-value statement i)))
+
+(defn run-prepared-statement [conn statement]
+  (loop [result []]
+  (let [step-value (sqlite3_step (deref-ptr statement))]
+    (cond
+      (= step-value SQLITE_ROW) (recur (conj result (get-row conn statement)))
+      (= step-value SQLITE_DONE) result))))
+
 (defn run-query [conn query & args]
-  (prn
-    (apply prepare-query conn query args)
+  (let [prepared (apply prepare-query conn query args)]
+    ; this shit is relevant
+    ; https://www.sqlite.org/c3ref/step.html
+    (run-prepared-statement conn prepared)
     )
-  (let [query (reduce
-                (fn [query arg]
-                  (let [replaced (string/replace-first query "?" (sqlize-val arg))]
-                    (if (= query replaced)
-                      (throw "arity mismatch in run-query")
-                      replaced)))
-                  query
-                  args)]
-    (run-raw-query conn query)))
+  )
 
 (let [conn (sqlite-connect "test.db")]
-  (prn (run-query conn "select a from testtable where a = ?;" "poop"))
-  (comment prn (run-raw-query conn "select a from testtable where a = \"poop\";")))
+  (prn (run-query conn "select * from testtable where a = ?;" "poop")))
