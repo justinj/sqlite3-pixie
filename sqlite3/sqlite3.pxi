@@ -169,8 +169,7 @@
   (let [statement (apply prepare-query conn query args)
         rows (run-prepared-statement conn statement)
         cols (get-column-names statement)]
-    (map #(zipmap cols %) rows)
-    )) 
+    (vec (map #(zipmap cols %) rows)))) 
 
 (let [conn (sqlite-connect "test.db")]
   (prn (run-query conn "select * from testtable where a = ? and b = ?;" "poop" 3)))
