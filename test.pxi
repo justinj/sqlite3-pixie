@@ -77,41 +77,14 @@
    SQLITE_BLOB    "SQLITE_BLOB"
    SQLITE_NULL    "SQLITE_NULL"})
 
-(def no-op-type (ffi/ffi-callback [CVoidP] CVoidP))
-; TODO: this should somehow use SQLITE_TRANSIENT
-(def no-op (ffi/ffi-prep-callback sqlite3_destructor_type (fn [_] 0)))
-
-(defn make-map-of-call [argc argv cols]
-  (into {}
-        (for [i (range 0 argc)]
-          (let [offset (* i 8)
-                col-name (keyword (ffi/unpack cols offset CCharP))
-                value (ffi/unpack argv offset CCharP)]
-            [col-name value]))))
-
-(defn make-setter-callback [result-atom]
-  (ffi/ffi-prep-callback
-    cb-type
-    (fn [_ argc argv cols]
-      (let [row (make-map-of-call argc argv cols)]
-        (swap! result-atom conj row))
-      0)))
-
 (defn sqlite-connect [db-name]
   (let [conn (buffer 255)]
     (sqlite3_open db-name conn)
     (ffi/unpack conn 0 CVoidP)))
 
-; TODO: this should escape stuff
-(defn sqlize-val [value]
-  (pr-str value))
-
 ; TODO: figure out an appropriate size for this
 (defn new-ptr []
   (buffer 255))
-
-(defn deref-str-ptr [ptr]
-  (ffi/unpack ptr 0 CCharP))
 
 (defn deref-ptr [ptr]
   (ffi/unpack ptr 0 CVoidP))
@@ -146,15 +119,8 @@
       statement
       nil)
     (dotimes [i (count args)]
-      (bind-arg statement (inc i) (nth args i))
-      )
-    statement
-    ))
-
-; 15:05 < justinjaffray> when doing ffi with pixie, is there a nice way to handle a function that returns a not-null-terminated string?
-; 15:10 < tbaldrid_> justinjaffray: if you define the function as returning a CVoidP, then you can use pixie.ffi/pack! and /unpack to read and write to data at that pointer.
-; 15:11 < tbaldrid_> e.g. (pixie.ffi/unpack ptr offset CUInt8)
-; 15:12 < tbaldrid_> that's pretty much the same as this C code: x = (char* ptr)[offset]
+      (bind-arg statement (inc i) (nth args i)))
+    statement))
 
 (defn read-n-chars [ptr n]
   (apply str (map #(char (ffi/unpack ptr % CUInt8))
