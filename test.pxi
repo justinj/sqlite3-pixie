@@ -19,9 +19,6 @@
 
   ; https://www.sqlite.org/c3ref/bind_parameter_index.html
   (f/defcfn sqlite3_bind_parameter_count)
-  ; we SHOULDNT need sqlite_stmt struct, we should just have an opaque pointer (duh why was this
-  ; not obvious)
-
   ; int sqlite3_prepare_v2(
   ;   sqlite3 *db,            /* Database handle */
   ;   const char *zSql,       /* SQL statement, UTF-8 encoded */
@@ -49,6 +46,8 @@
   (f/defcfn sqlite3_column_bytes)
   (f/defcfn sqlite3_column_type)
   (f/defcfn sqlite3_column_count)
+  (f/defcfn sqlite3_column_name)
+
   (f/defcfn sqlite3_column_text)
   (f/defcfn sqlite3_column_text16)
   (f/defcfn sqlite3_column_int64)
@@ -66,6 +65,9 @@
   (f/defconst SQLITE_NULL))
 
 
+; this is declared on its own because ffi-infer infers it to ask for a function
+; pointer for the last arg, but we want to pass SQLITE_TRANSIENT
+; TODO: check if we *actually* need to do this? seems sketch
 (def sqlite3_bind_text (ffi/ffi-fn libsqlite "sqlite3_bind_text" [CVoidP CInt CCharP CInt CInt] CInt))
 
 (def column-type-name
@@ -117,41 +119,37 @@
 ; this is relevant for prepared statements
 ; ruby calls into sqlite to bind parameters so I guess we should do the same
 
+(defmulti bind-arg (fn [_ _ arg] (type arg)))
+
+(defmethod bind-arg String
+  [statement column value]
+  (sqlite3_bind_text
+    (deref-ptr statement)
+    column ; index to set
+    value
+    (count value)
+    -1))
+
+(defmethod bind-arg Integer
+  [statement column value]
+  (sqlite3_bind_int64
+    (deref-ptr statement)
+    column ; index to set
+    value))
+
 (defn prepare-query [conn query & args]
-  (let [ptr (new-ptr)]
+  (let [statement (new-ptr)]
     (sqlite3_prepare_v2
       conn
       query
       -1 ; read up to the first null terminator
-      ptr
+      statement
       nil)
     (dotimes [i (count args)]
-      ; (sqlite3_bind_int64
-      ;   (deref-ptr ptr)
-      ;   (inc i) ; index to set
-      ;   (nth args i))
-      (sqlite3_bind_text
-        (deref-ptr ptr)
-        (inc i) ; index to set
-        (nth args i)
-        (count (nth args i))
-        -1
-        )
+      (bind-arg statement (inc i) (nth args i))
       )
-    ptr
-    )
-  ; (let [split (string/split query "?")]
-  ;   ; (prn split)
-  ;   split
-  ;   )
-  )
-
-; TODO: check the connection is valid
-(defn run-raw-query [conn query]
-  (let [result (atom [])
-        set-result (make-setter-callback result)]
-    (sqlite3_exec conn query set-result nil nil)
-    @result))
+    statement
+    ))
 
 ; 15:05 < justinjaffray> when doing ffi with pixie, is there a nice way to handle a function that returns a not-null-terminated string?
 ; 15:10 < tbaldrid_> justinjaffray: if you define the function as returning a CVoidP, then you can use pixie.ffi/pack! and /unpack to read and write to data at that pointer.
@@ -184,13 +182,29 @@
       (= step-value SQLITE_ROW) (recur (conj result (get-row conn statement)))
       (= step-value SQLITE_DONE) result))))
 
+(defn get-column-names [statement]
+  (let [num-cols (sqlite3_column_count (deref-ptr statement))]
+    (map keyword
+         (map #(sqlite3_column_name (deref-ptr statement) %) (range 0 num-cols)))))
+
+; TODO: this should maybe go in stdlib
+(defn zipmap [as bs]
+  (loop [m {}
+         as as
+         bs bs]
+    (cond (empty? as) m
+          (empty? bs) m
+          :else (recur (assoc m (first as) (first bs))
+                       (rest as)
+                       (rest bs)))))
+
+; TODO: we should make sure the connection is valid
 (defn run-query [conn query & args]
-  (let [prepared (apply prepare-query conn query args)]
-    ; this shit is relevant
-    ; https://www.sqlite.org/c3ref/step.html
-    (run-prepared-statement conn prepared)
-    )
-  )
+  (let [statement (apply prepare-query conn query args)
+        rows (run-prepared-statement conn statement)
+        cols (get-column-names statement)]
+    (map #(zipmap cols %) rows)
+    )) 
 
 (let [conn (sqlite-connect "test.db")]
-  (prn (run-query conn "select * from testtable where a = ?;" "poop")))
+  (prn (run-query conn "select * from testtable where a = ? and b = ?;" "poop" 3)))
