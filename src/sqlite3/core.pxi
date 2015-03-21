@@ -40,8 +40,10 @@
   ; 5th arg (for blob and string): destructor
   ; 6th arg: encoding for text64
   (f/defcfn sqlite3_bind_int64)
+  (f/defcfn sqlite3_bind_double)
   
   (f/defcfn sqlite3_step)
+  (f/defcfn sqlite3_reset)
 
   (f/defcfn sqlite3_column_bytes)
   (f/defcfn sqlite3_column_type)
@@ -51,6 +53,7 @@
   (f/defcfn sqlite3_column_text)
   (f/defcfn sqlite3_column_text16)
   (f/defcfn sqlite3_column_int64)
+  (f/defcfn sqlite3_column_double)
 
   (f/defccallback sqlite3_destructor_type)
   (f/defconst SQLITE_TRANSIENT)
@@ -113,6 +116,13 @@
     column ; index to set
     value))
 
+(defmethod bind-arg Float
+  [statement column value]
+  (sqlite3_bind_double
+    (deref-ptr statement)
+    column ; index to set
+    value))
+
 (defn prepare-query [conn query & args]
   (let [statement (new-ptr)]
     (sqlite3_prepare_v2
@@ -131,14 +141,15 @@
 
 (defmulti load-value #(sqlite3_column_type (deref-ptr %1) %2))
 
-(defmethod load-value SQLITE_TEXT
-  [statement column]
+(defmethod load-value SQLITE_TEXT [statement column]
   (let [size (sqlite3_column_bytes (deref-ptr statement) column)]
     (read-n-chars (sqlite3_column_text (deref-ptr statement) column) size)))
 
-(defmethod load-value SQLITE_INTEGER
-  [statement column]
+(defmethod load-value SQLITE_INTEGER [statement column]
   (sqlite3_column_int64 (deref-ptr statement) column))
+
+(defmethod load-value SQLITE_FLOAT [statement column]
+  (sqlite3_column_double (deref-ptr statement) column))
 
 (defn get-row [conn statement]
   (for [i (range 0 (sqlite3_column_count (deref-ptr statement)))]
@@ -146,10 +157,11 @@
 
 (defn run-prepared-statement [conn statement]
   (loop [result []]
-  (let [step-value (sqlite3_step (deref-ptr statement))]
-    (cond
-      (= step-value SQLITE_ROW) (recur (conj result (get-row conn statement)))
-      (= step-value SQLITE_DONE) result))))
+    (let [step-value (sqlite3_step (deref-ptr statement))]
+      (cond
+        (= step-value SQLITE_ROW) (recur (conj result (get-row conn statement)))
+        (= step-value SQLITE_DONE) (do (sqlite3_reset (deref-ptr statement))
+                                       result)))))
 
 (defn get-column-names [statement]
   (let [num-cols (sqlite3_column_count (deref-ptr statement))]
@@ -171,7 +183,7 @@
 (defn run-query [conn query & args]
   (let [statement (apply prepare-query conn query args)
         rows (run-prepared-statement conn statement)
-        cols (get-column-names statement)]
+        cols (vec (get-column-names statement))]
     (vec (map #(zipmap cols %) rows)))) 
 
 (defn with-connection [filename handler]
@@ -180,12 +192,13 @@
     (close-connection conn)))
 
 (def -symbol->column-type
-  {:string "STRING"
-   :integer "INTEGER"})
+  {:string  "STRING"
+   :integer "INTEGER"
+   :float   "FLOAT"})
 
-(defn -pair->ddl [[col-name type]]
+(defn- pair->ddl [[col-name type]]
   (str (name col-name) " " (-symbol->column-type type)))
 
 (defn create-table-ddl [table & specs]
   (str "CREATE TABLE " (name table) " "
-       "(" (apply str (interpose ", " (map -pair->ddl specs))) ");"))
+       "(" (apply str (interpose ", " (map pair->ddl specs))) ");"))

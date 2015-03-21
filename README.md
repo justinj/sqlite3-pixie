@@ -7,6 +7,6 @@ TODO
 ====
 
 * there's a bunch of memory leaks
-* tests
 * transactions
 * make api similar to jdbc
+* make the finding of the sqlite library cross platform, this might entail packaging a sqlite tarball with this library
