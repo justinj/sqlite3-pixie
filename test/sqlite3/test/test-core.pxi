@@ -6,29 +6,26 @@
 (def db-name "/tmp/test.db")
 
 (defn remove-table []
-  (sqlite/with-connection db-name
-    (fn [conn]
-      (sqlite/run-query conn "DROP TABLE ssbm_players;")
-      (sqlite/close-connection conn))))
+  (sqlite/with-connection db-name [conn]
+      (sqlite/query conn "DROP TABLE ssbm_players;")
+      (sqlite/close-connection conn)))
 
 (defn create-table []
-  (sqlite/with-connection db-name
-    (fn [conn]
-      (sqlite/run-query conn "CREATE TABLE ssbm_players
-                             (name STRING,
-                             character STRING,
-                             ssbmrank INTEGER PRIMARY KEY,
-                             score FLOAT);"))))
+  (sqlite/with-connection db-name [conn]
+    (sqlite/query conn "CREATE TABLE ssbm_players
+                           (name STRING,
+                           character STRING,
+                           ssbmrank INTEGER PRIMARY KEY,
+                           score FLOAT);")))
 
 (defn insert-row [data]
-  (sqlite/with-connection db-name
-    (fn [conn]
-      (sqlite/run-query conn "INSERT INTO ssbm_players (name, character, ssbmrank, score)
+  (sqlite/with-connection db-name [conn]
+      (sqlite/query conn "INSERT INTO ssbm_players (name, character, ssbmrank, score)
                              VALUES (?, ?, ?, ?)"
                         (:name      data)
                         (:character data)
                         (:ssbmrank  data)
-                        (:score     data)))))
+                        (:score     data))))
 
 (defn insert-test-data []
   (insert-row {:name "Mango"     :character "Fox"        :ssbmrank 1 :score 10.00})
@@ -46,10 +43,9 @@
 (defmacro test-query-result [name query expected-result]
   `(t/deftest ~name
      (set-up-testdb)
-     (sqlite/with-connection "/tmp/test.db"
-       (fn [conn]
-         (let [results (sqlite/run-query conn ~@query)]
-           (t/assert= results ~expected-result))))))
+     (sqlite/with-connection "/tmp/test.db" [conn]
+         (let [results (sqlite/query conn ~@query)]
+           (t/assert= results ~expected-result)))))
 
 (test-query-result no-binding
   ["SELECT name FROM ssbm_players;"]
@@ -72,10 +68,15 @@
   ["SELECT name FROM ssbm_players WHERE score = ?;" 10.00]
   [{:name "Mango"}])
 
+(test-query-result with-binding-multiple
+  ["SELECT name FROM ssbm_players WHERE character = ? AND ssbmrank = ?;" "Fox" 1]
+  [{:name "Mango"}])
+
 (test-query-result with-retrieving-float
   ["SELECT score FROM ssbm_players WHERE name = 'PPMD';"]
   [{:score 9.750}])
 
+; this guy isn't actually used yet...
 (t/deftest create-table-ddl
   (t/assert= "CREATE TABLE ssbm_players (name STRING, character STRING, ssbmrank INTEGER, score FLOAT);"
              (sqlite/create-table-ddl :ssbm_players
@@ -83,3 +84,13 @@
                                       [:character :string]
                                       [:ssbmrank  :integer]
                                       [:score     :float])))
+
+(t/deftest throws-on-too-many-params
+  (t/assert-throws?
+    (sqlite/with-connection db-name [conn]
+      (sqlite/query conn "SELECT name FROM ssbm_players WHERE name = 'PPMD'" "PPMD"))))
+
+(t/deftest throws-on-not-enough-params
+  (t/assert-throws?
+    (sqlite/with-connection db-name [conn]
+      (sqlite/query conn "SELECT name FROM ssbm_players WHERE name = ?"))))

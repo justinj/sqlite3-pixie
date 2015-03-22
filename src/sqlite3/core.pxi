@@ -58,9 +58,11 @@
   (f/defccallback sqlite3_destructor_type)
   (f/defconst SQLITE_TRANSIENT)
 
+  ; the possible return values from sqlite3_step
   (f/defconst SQLITE_ROW)
   (f/defconst SQLITE_DONE)
 
+  ; possible value types, currently we only use the first 3
   (f/defconst SQLITE_INTEGER)
   (f/defconst SQLITE_FLOAT)
   (f/defconst SQLITE_TEXT)
@@ -80,17 +82,17 @@
    SQLITE_BLOB    "SQLITE_BLOB"
    SQLITE_NULL    "SQLITE_NULL"})
 
+; TODO: figure out an appropriate size for this
+(defn new-ptr []
+  (buffer 255))
+
 (defn connect [db-name]
-  (let [conn (buffer 255)]
+  (let [conn (new-ptr)]
     (sqlite3_open db-name conn)
     (ffi/unpack conn 0 CVoidP)))
 
 (defn close-connection [conn]
   (sqlite3_close_v2 conn))
-
-; TODO: figure out an appropriate size for this
-(defn new-ptr []
-  (buffer 255))
 
 (defn deref-ptr [ptr]
   (ffi/unpack ptr 0 CVoidP))
@@ -98,9 +100,9 @@
 ; this is relevant for prepared statements
 ; ruby calls into sqlite to bind parameters so I guess we should do the same
 
-(defmulti bind-arg (fn [_ _ arg] (type arg)))
+(defmulti bind-param (fn [_ _ arg] (type arg)))
 
-(defmethod bind-arg String
+(defmethod bind-param String
   [statement column value]
   (sqlite3_bind_text
     (deref-ptr statement)
@@ -109,14 +111,14 @@
     (count value)
     -1))
 
-(defmethod bind-arg Integer
+(defmethod bind-param Integer
   [statement column value]
   (sqlite3_bind_int64
     (deref-ptr statement)
     column ; index to set
     value))
 
-(defmethod bind-arg Float
+(defmethod bind-param Float
   [statement column value]
   (sqlite3_bind_double
     (deref-ptr statement)
@@ -131,8 +133,15 @@
       -1 ; read up to the first null terminator
       statement
       nil)
+    (let [required-arg-count (sqlite3_bind_parameter_count (deref-ptr statement))
+          provided-arg-count (count args)]
+      (assert (= provided-arg-count required-arg-count)
+              (str "Arity mismatch in sqlite query: "
+                   query " expects "
+                   required-arg-count " arguments, "
+                   provided-arg-count " provided.")))
     (dotimes [i (count args)]
-      (bind-arg statement (inc i) (nth args i)))
+      (bind-param statement (inc i) (nth args i)))
     statement))
 
 (defn read-n-chars [ptr n]
@@ -180,24 +189,28 @@
                        (rest bs)))))
 
 ; TODO: we should make sure the connection is valid
-(defn run-query [conn query & args]
+(defn query [conn query & args]
   (let [statement (apply prepare-query conn query args)
         rows (run-prepared-statement conn statement)
         cols (vec (get-column-names statement))]
     (vec (map #(zipmap cols %) rows)))) 
 
-(defn with-connection [filename handler]
+(defn- with-connection-fn [filename handler]
   (let [conn (connect filename)]
     (handler conn)
     (close-connection conn)))
 
-(def -symbol->column-type
+(defmacro with-connection [db-name bindings & body]
+  `(with-connection-fn ~db-name
+                       (fn ~bindings ~@body)))
+
+(def symbol->column-type
   {:string  "STRING"
    :integer "INTEGER"
    :float   "FLOAT"})
 
 (defn- pair->ddl [[col-name type]]
-  (str (name col-name) " " (-symbol->column-type type)))
+  (str (name col-name) " " (symbol->column-type type)))
 
 (defn create-table-ddl [table & specs]
   (str "CREATE TABLE " (name table) " "
