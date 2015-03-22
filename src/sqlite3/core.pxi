@@ -59,6 +59,8 @@
   (f/defcfn sqlite3_column_int64)
   (f/defcfn sqlite3_column_double)
 
+  (f/defconst SQLITE_OK)
+
   (f/defccallback sqlite3_destructor_type)
   (f/defconst SQLITE_TRANSIENT)
 
@@ -95,6 +97,9 @@
         error-code (sqlite3_open db-name conn-buffer)
         conn (ffi/unpack conn-buffer 0 CVoidP)]
     (ffi/dispose! conn-buffer)
+    (when-not (= error-code SQLITE_OK)
+      (throw (str "Sqlite Error: "
+                  (sqlite3_errmsg conn))))
     conn))
 
 (defn close-connection [conn]

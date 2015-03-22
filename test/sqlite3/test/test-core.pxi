@@ -93,3 +93,19 @@
   (t/assert-throws?
     (sqlite/with-connection db-name [conn]
       (sqlite/query conn "SELECT name FROM ssbm_players WHERE name = ?"))))
+
+(t/deftest throws-on-opening-invalid-filename
+  (t/assert-throws?
+    RuntimeException
+    "Sqlite Error: unable to open database file"
+    (sqlite/with-connection "." [_])))
+
+; TODO:
+; (t/deftest throws-on-using-invalid-connection
+;   (t/assert-throws?
+;     RuntimeException
+;     "who the hell knows"
+;     (do 
+;       (let [conn (sqlite/connect "test.db")]
+;         (sqlite/close-connection conn)
+;         (prn (sqlite/query conn "SELECT * FROM ssbm_players"))))))
