@@ -1,20 +1,15 @@
 (ns sqlite3.core
   (require pixie.ffi :as ffi)
   (require pixie.ffi-infer :as f)
-  (require pixie.string :as string)
-  )
-
-; TODO: Make sure we are freeing the stuff from sqlite when we need to...
+  (require pixie.string :as string))
 
 (def libsqlite-name "/usr/lib/sqlite3/libtclsqlite3.dylib")
 (def libsqlite (ffi-library libsqlite-name))
 
-(def cb-type (ffi/ffi-callback [CVoidP CInt32 CVoidP CVoidP] CInt))
 (f/with-config {:library "sqlite3"
                 :includes ["sqlite3.h"]}
   (f/defcfn sqlite3_open)
   ; last arg to exec is a buffer for errors, maybe useful
-  (f/defcfn sqlite3_exec)
   (f/defcfn sqlite3_close_v2)
 
   ; https://www.sqlite.org/c3ref/bind_parameter_index.html
@@ -32,8 +27,8 @@
   ; int sqlite3_finalize(sqlite3_stmt *pStmt);
   (f/defcfn sqlite3_finalize)
 
+  ; const char *sqlite3_errmsg(sqlite3*);
   (f/defcfn sqlite3_errmsg)
-
 
   ; binding functions
   ; 1st arg: pointer to statement
@@ -46,23 +41,34 @@
   (f/defcfn sqlite3_bind_int64)
   (f/defcfn sqlite3_bind_double)
   
+  ; When executing a prepared statement, called to request a new row of results.
+  ; Returns SQLITE_ROW when there is another row available and SQLITE_DONE when
+  ; there are no more rows.
   (f/defcfn sqlite3_step)
-  (f/defcfn sqlite3_reset)
 
-  (f/defcfn sqlite3_column_bytes)
-  (f/defcfn sqlite3_column_type)
+  ; The row data can be extracted with the following:
+  ; Generally these functions take a statement, and some of the take a column index.
+
+  ; How many columns are there in the returned data
   (f/defcfn sqlite3_column_count)
+
+  ; Name of the ith column
   (f/defcfn sqlite3_column_name)
 
+  ; Type of data stored in the column, one of five
+  (f/defcfn sqlite3_column_type)
+
+  ; Extract the value of a text column. The strings are *not* NULL-terminated,
+  ; so the size of the data to be extracted must first be obtained with
+  ; sqlite3_column_bytes.
   (f/defcfn sqlite3_column_text)
   (f/defcfn sqlite3_column_text16)
+  (f/defcfn sqlite3_column_bytes)
+
   (f/defcfn sqlite3_column_int64)
   (f/defcfn sqlite3_column_double)
 
   (f/defconst SQLITE_OK)
-
-  (f/defccallback sqlite3_destructor_type)
-  (f/defconst SQLITE_TRANSIENT)
 
   ; the possible return values from sqlite3_step
   (f/defconst SQLITE_ROW)
@@ -78,15 +84,9 @@
 
 ; this is declared on its own because ffi-infer infers it to ask for a function
 ; pointer for the last arg, but we want to pass SQLITE_TRANSIENT
-; TODO: check if we *actually* need to do this? seems sketch
+; this seems fixable, but I'm not sure how right now
+(def SQLITE_TRANSIENT -1)
 (def sqlite3_bind_text (ffi/ffi-fn libsqlite "sqlite3_bind_text" [CVoidP CInt CCharP CInt CInt] CInt))
-
-(def column-type-name
-  {SQLITE_INTEGER "SQLITE_INTEGER"
-   SQLITE_FLOAT   "SQLITE_FLOAT"
-   SQLITE_TEXT    "SQLITE_TEXT"
-   SQLITE_BLOB    "SQLITE_BLOB"
-   SQLITE_NULL    "SQLITE_NULL"})
 
 ; TODO: figure out an appropriate size for this
 (defn new-ptr []
@@ -105,36 +105,8 @@
 (defn close-connection [conn]
   (sqlite3_close_v2 conn))
 
-(defn deref-ptr [ptr]
+(defn- deref-ptr [ptr]
   (ffi/unpack ptr 0 CVoidP))
-; https://github.com/sparklemotion/sqlite3-ruby/blob/master/lib/sqlite3/statement.rb#L22
-; this is relevant for prepared statements
-; ruby calls into sqlite to bind parameters so I guess we should do the same
-
-(defmulti bind-param (fn [_ _ arg] (type arg)))
-
-(defmethod bind-param String
-  [statement column value]
-  (sqlite3_bind_text
-    (deref-ptr statement)
-    column ; index to set
-    value
-    (count value)
-    -1))
-
-(defmethod bind-param Integer
-  [statement column value]
-  (sqlite3_bind_int64
-    (deref-ptr statement)
-    column ; index to set
-    value))
-
-(defmethod bind-param Float
-  [statement column value]
-  (sqlite3_bind_double
-    (deref-ptr statement)
-    column ; index to set
-    value))
 
 (defn prepare-query [conn query args]
   (let [statement (new-ptr)]
@@ -155,11 +127,33 @@
       (bind-param statement (inc i) (nth args i)))
     statement))
 
-(defn read-n-chars [ptr n]
+(defmulti
+  ^{:doc "Binds the parameter to the prepared statement at the specified index"
+    :private true}
+  bind-param
+  (fn [_ _ arg] (type arg)))
+
+(defmethod bind-param String
+  [statement column value]
+  (sqlite3_bind_text (deref-ptr statement) column value (count value) SQLITE_TRANSIENT))
+
+(defmethod bind-param Integer
+  [statement column value]
+  (sqlite3_bind_int64 (deref-ptr statement) column value))
+
+(defmethod bind-param Float
+  [statement column value]
+  (sqlite3_bind_double (deref-ptr statement) column value))
+
+(defn- read-n-chars [ptr n]
   (apply str (map #(char (ffi/unpack ptr % CUInt8))
        (range 0 n))))
 
-(defmulti load-value #(sqlite3_column_type (deref-ptr %1) %2))
+(defmulti
+  ^{:doc "Extracts the value for the specified column in a particular statement
+following a call to sqlite3_step"
+    :private true}
+  load-value #(sqlite3_column_type (deref-ptr %1) %2))
 
 (defmethod load-value SQLITE_TEXT [statement column]
   (let [size (sqlite3_column_bytes (deref-ptr statement) column)]
@@ -171,19 +165,20 @@
 (defmethod load-value SQLITE_FLOAT [statement column]
   (sqlite3_column_double (deref-ptr statement) column))
 
-(defn get-row [conn statement]
+
+(defn- get-row [conn statement]
+  "Get a seq of all the column values for a row after a call to sqlite3_step"
   (for [i (range 0 (sqlite3_column_count (deref-ptr statement)))]
     (load-value statement i)))
 
-(defn run-prepared-statement [conn statement]
+(defn- run-prepared-statement [conn statement]
   (loop [result []]
     (let [step-value (sqlite3_step (deref-ptr statement))]
       (cond
         (= step-value SQLITE_ROW) (recur (conj result (get-row conn statement)))
-        (= step-value SQLITE_DONE) (do (sqlite3_reset (deref-ptr statement))
-                                       result)))))
+        (= step-value SQLITE_DONE) result))))
 
-(defn get-column-names [statement]
+(defn- get-column-names [statement]
   (let [num-cols (sqlite3_column_count (deref-ptr statement))]
     (map keyword
          (map #(sqlite3_column_name (deref-ptr statement) %) (range 0 num-cols)))))
@@ -218,6 +213,7 @@
                        (fn ~bindings ~@body)))
 
 (def symbol->column-type
+  ^{:private true}
   {:string  "STRING"
    :integer "INTEGER"
    :float   "FLOAT"})

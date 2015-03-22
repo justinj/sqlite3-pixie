@@ -76,13 +76,13 @@
   [{:score 9.750}])
 
 ; this guy isn't actually used yet...
-(t/deftest create-table-ddl
-  (t/assert= "CREATE TABLE ssbm_players (name STRING, character STRING, ssbmrank INTEGER, score FLOAT);"
-             (sqlite/create-table-ddl :ssbm_players
-                                      [:name      :string]
-                                      [:character :string]
-                                      [:ssbmrank  :integer]
-                                      [:score     :float])))
+; (t/deftest create-table-ddl
+;   (t/assert= "CREATE TABLE ssbm_players (name STRING, character STRING, ssbmrank INTEGER, score FLOAT);"
+;              (sqlite/create-table-ddl :ssbm_players
+;                                       [:name      :string]
+;                                       [:character :string]
+;                                       [:ssbmrank  :integer]
+;                                       [:score     :float])))
 
 (t/deftest throws-on-too-many-params
   (t/assert-throws?
@@ -104,7 +104,7 @@
 ; (t/deftest throws-on-using-invalid-connection
 ;   (t/assert-throws?
 ;     RuntimeException
-;     "who the hell knows"
+;     "who the heck knows"
 ;     (do 
 ;       (let [conn (sqlite/connect "test.db")]
 ;         (sqlite/close-connection conn)
