@@ -5,7 +5,7 @@ Sqlite3 bindings for [Pixie](https://github.com/pixie-lang/pixie).
 
 This library is not ready to be used in general unless you like bugs and probable interface changes.
 
-In particular, this almost certainly does not work on Linux at the moment (due to the hardcoded location of the sqlite dsym).
+In particular, this almost certainly does not work on Linux at the moment (due to the hardcoded location of the sqlite dylib).
 
 Presumably in the future Pixie will have a more uniform interface across different SQL databases, like Clojure has jdbc, so this is sort of temporary (in its current form, at least).
 
