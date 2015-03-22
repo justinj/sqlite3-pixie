@@ -7,7 +7,7 @@ This library is not ready to be used in general unless you like bugs and probabl
 
 In particular, this almost certainly does not work on Linux at the moment (due to the hardcoded location of the sqlite dsym).
 
-Presumably in the future Pixie will have a more uniform interface across different SQL database, like Clojure has jdbc, so this is sort of temporary (in its current form, at least).
+Presumably in the future Pixie will have a more uniform interface across different SQL databases, like Clojure has jdbc, so this is sort of temporary (in its current form, at least).
 
 Pull requests welcome!
 
