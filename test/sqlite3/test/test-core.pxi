@@ -1,4 +1,3 @@
-
 (ns sqlite3.test
   (require pixie.test :as t)
   (require sqlite3.core :as sqlite))

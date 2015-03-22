@@ -28,6 +28,10 @@
   ; );
   ; see https://www.sqlite.org/c3ref/prepare.html
   (f/defcfn sqlite3_prepare_v2)
+
+  ; int sqlite3_finalize(sqlite3_stmt *pStmt);
+  (f/defcfn sqlite3_finalize)
+
   (f/defcfn sqlite3_errmsg)
 
 
@@ -87,9 +91,11 @@
   (buffer 255))
 
 (defn connect [db-name]
-  (let [conn (new-ptr)]
-    (sqlite3_open db-name conn)
-    (ffi/unpack conn 0 CVoidP)))
+  (let [conn-buffer (new-ptr)
+        error-code (sqlite3_open db-name conn-buffer)
+        conn (ffi/unpack conn-buffer 0 CVoidP)]
+    (ffi/dispose! conn-buffer)
+    conn))
 
 (defn close-connection [conn]
   (sqlite3_close_v2 conn))
@@ -125,7 +131,7 @@
     column ; index to set
     value))
 
-(defn prepare-query [conn query & args]
+(defn prepare-query [conn query args]
   (let [statement (new-ptr)]
     (sqlite3_prepare_v2
       conn
@@ -190,9 +196,11 @@
 
 ; TODO: we should make sure the connection is valid
 (defn query [conn query & args]
-  (let [statement (apply prepare-query conn query args)
+  (let [statement (prepare-query conn query args)
         rows (run-prepared-statement conn statement)
         cols (vec (get-column-names statement))]
+    (sqlite3_finalize (deref-ptr statement))
+    (ffi/dispose! statement)
     (vec (map #(zipmap cols %) rows)))) 
 
 (defn- with-connection-fn [filename handler]
