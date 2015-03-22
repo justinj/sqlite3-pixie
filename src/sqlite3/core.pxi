@@ -24,10 +24,10 @@
   ; see https://www.sqlite.org/c3ref/prepare.html
   (f/defcfn sqlite3_prepare_v2)
 
-  ; int sqlite3_finalize(sqlite3_stmt *pStmt);
+  ; Destroys a statement
   (f/defcfn sqlite3_finalize)
 
-  ; const char *sqlite3_errmsg(sqlite3*);
+  ; Takes a connection and returns a string error
   (f/defcfn sqlite3_errmsg)
 
   ; binding functions
@@ -47,7 +47,7 @@
   (f/defcfn sqlite3_step)
 
   ; The row data can be extracted with the following:
-  ; Generally these functions take a statement, and some of the take a column index.
+  ; Generally these functions take a statement, and some of them take a column index.
 
   ; How many columns are there in the returned data
   (f/defcfn sqlite3_column_count)
@@ -81,10 +81,11 @@
   (f/defconst SQLITE_BLOB)
   (f/defconst SQLITE_NULL))
 
-
 ; this is declared on its own because ffi-infer infers it to ask for a function
 ; pointer for the last arg, but we want to pass SQLITE_TRANSIENT
 ; this seems fixable, but I'm not sure how right now
+; SQLITE_TRANSIENT tells bind_text that the string we are passing in can
+; potentially be garbage collected, and so it should make an internal copy
 (def SQLITE_TRANSIENT -1)
 (def sqlite3_bind_text (ffi/ffi-fn libsqlite "sqlite3_bind_text" [CVoidP CInt CCharP CInt CInt] CInt))
 
@@ -105,6 +106,8 @@
 (defn close-connection [conn]
   (sqlite3_close_v2 conn))
 
+; TODO: I feel like the fact that this is used so often implies that in some
+; cases we should just pass around the deref'd ptr
 (defn- deref-ptr [ptr]
   (ffi/unpack ptr 0 CVoidP))
 
