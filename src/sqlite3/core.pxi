@@ -221,6 +221,6 @@ following a call to sqlite3_step"
 (defn- pair->ddl [[col-name type]]
   (str (name col-name) " " (symbol->column-type type)))
 
-(defn create-table-ddl [table & specs]
-  (str "CREATE TABLE " (name table) " "
-       "(" (apply str (interpose ", " (map pair->ddl specs))) ");"))
+; (defn create-table-ddl [table & specs]
+;   (str "CREATE TABLE " (name table) " "
+;        "(" (apply str (interpose ", " (map pair->ddl specs))) ");"))
