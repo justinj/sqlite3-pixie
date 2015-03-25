@@ -3,7 +3,7 @@
   (require pixie.ffi-infer :as f)
   (require pixie.string :as string))
 
-(def libsqlite-name "/usr/lib/sqlite3/libtclsqlite3.dylib")
+(def libsqlite-name (f/full-lib-name "sqlite3"))
 (def libsqlite (ffi-library libsqlite-name))
 
 (f/with-config {:library "sqlite3"
@@ -79,15 +79,21 @@
   (f/defconst SQLITE_FLOAT)
   (f/defconst SQLITE_TEXT)
   (f/defconst SQLITE_BLOB)
-  (f/defconst SQLITE_NULL))
+  (f/defconst SQLITE_NULL)
+  
+  (f/defglobal SQLITE_TRANSIENT))
 
 ; this is declared on its own because ffi-infer infers it to ask for a function
 ; pointer for the last arg, but we want to pass SQLITE_TRANSIENT
 ; this seems fixable, but I'm not sure how right now
 ; SQLITE_TRANSIENT tells bind_text that the string we are passing in can
 ; potentially be garbage collected, and so it should make an internal copy
+; TODO: this is what should realllly be fixed. I feel like this is a bug in
+; pixie's ffi-infer, since I get some weird unspecified error when I try to use
+; the inferred one.
 (def SQLITE_TRANSIENT -1)
-(def sqlite3_bind_text (ffi/ffi-fn libsqlite "sqlite3_bind_text" [CVoidP CInt CCharP CInt CInt] CInt))
+; (prn "we got " SQLITE_TRANSIENT)
+(def sqlite3_bind_text (ffi/ffi-fn libsqlite "sqlite3_bind_text" [CVoidP CInt CCharP CInt CVoidP] CInt))
 
 ; TODO: figure out an appropriate size for this
 (defn new-ptr []
