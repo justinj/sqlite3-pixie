@@ -81,7 +81,7 @@
   (f/defconst SQLITE_BLOB)
   (f/defconst SQLITE_NULL)
   
-  (f/defglobal SQLITE_TRANSIENT))
+  (comment f/defglobal SQLITE_TRANSIENT))
 
 ; this is declared on its own because ffi-infer infers it to ask for a function
 ; pointer for the last arg, but we want to pass SQLITE_TRANSIENT
@@ -93,11 +93,11 @@
 ; the inferred one.
 (def SQLITE_TRANSIENT -1)
 ; (prn "we got " SQLITE_TRANSIENT)
-(def sqlite3_bind_text (ffi/ffi-fn libsqlite "sqlite3_bind_text" [CVoidP CInt CCharP CInt CVoidP] CInt))
+(def sqlite3_bind_text (ffi/ffi-fn libsqlite "sqlite3_bind_text" [CVoidP CInt CCharP CInt CInt] CInt))
 
 ; TODO: figure out an appropriate size for this
 (defn new-ptr []
-  (buffer 255))
+  (buffer 8))
 
 (defn connect [db-name]
   (let [conn-buffer (new-ptr)
