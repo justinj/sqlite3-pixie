@@ -8,20 +8,18 @@
 
 (f/with-config {:library "sqlite3"
                 :includes ["sqlite3.h"]}
-  (f/defcfn sqlite3_open)
   ; last arg to exec is a buffer for errors, maybe useful
+  (f/defcfn sqlite3_exec)
+
+  (f/defcfn sqlite3_open)
   (f/defcfn sqlite3_close_v2)
 
   ; https://www.sqlite.org/c3ref/bind_parameter_index.html
   (f/defcfn sqlite3_bind_parameter_count)
-  ; int sqlite3_prepare_v2(
-  ;   sqlite3 *db,            /* Database handle */
-  ;   const char *zSql,       /* SQL statement, UTF-8 encoded */
-  ;   int nByte,              /* Maximum length of zSql in bytes. */
-  ;   sqlite3_stmt **ppStmt,  /* OUT: Statement handle */
-  ;   const char **pzTail     /* OUT: Pointer to unused portion of zSql */
-  ; );
-  ; see https://www.sqlite.org/c3ref/prepare.html
+
+  ; takes connection, sql statement, number of bytes in the sql statement,
+  ; OUTPUT parameter to a statement, and an OUTPUT parameter to the unused
+  ; portion of the second argument
   (f/defcfn sqlite3_prepare_v2)
 
   ; Destroys a statement
@@ -46,7 +44,7 @@
   ; there are no more rows.
   (f/defcfn sqlite3_step)
 
-  ; The row data can be extracted with the following:
+  ; The following functions deal with extracting data after a query
   ; Generally these functions take a statement, and some of them take a column index.
 
   ; How many columns are there in the returned data
@@ -68,10 +66,13 @@
   (f/defcfn sqlite3_column_int64)
   (f/defcfn sqlite3_column_double)
 
+  ; returned by a number of function to signal no error
   (f/defconst SQLITE_OK)
 
   ; the possible return values from sqlite3_step
+  ; means there is another row of data available
   (f/defconst SQLITE_ROW)
+  ; means no more rows of data
   (f/defconst SQLITE_DONE)
 
   ; possible value types, currently we only use the first 3
@@ -79,9 +80,7 @@
   (f/defconst SQLITE_FLOAT)
   (f/defconst SQLITE_TEXT)
   (f/defconst SQLITE_BLOB)
-  (f/defconst SQLITE_NULL)
-  
-  (comment f/defglobal SQLITE_TRANSIENT))
+  (f/defconst SQLITE_NULL))
 
 ; this is declared on its own because ffi-infer infers it to ask for a function
 ; pointer for the last arg, but we want to pass SQLITE_TRANSIENT
