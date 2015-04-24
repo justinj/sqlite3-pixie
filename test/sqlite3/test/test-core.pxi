@@ -97,7 +97,7 @@
 (t/deftest throws-on-opening-invalid-filename
   (t/assert-throws?
     RuntimeException
-    "Sqlite Error: unable to open database file"
+    "Sqlite Error"
     (sqlite/with-connection "." [_])))
 
 ; TODO:

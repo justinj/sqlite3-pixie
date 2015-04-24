@@ -104,8 +104,8 @@
         conn (ffi/unpack conn-buffer 0 CVoidP)]
     (ffi/dispose! conn-buffer)
     (when-not (= error-code SQLITE_OK)
-      (throw (str "Sqlite Error: "
-                  (sqlite3_errmsg conn))))
+      (throw {:msg "Sqlite Error"
+              :data (sqlite3_errmsg conn)}))
     conn))
 
 (defn close-connection [conn]
@@ -153,10 +153,6 @@
   [statement column value]
   (sqlite3_bind_double (deref-ptr statement) column value))
 
-(defn- read-n-chars [ptr n]
-  (apply str (map #(char (ffi/unpack ptr % CUInt8))
-       (range 0 n))))
-
 (defmulti
   ^{:doc "Extracts the value for the specified column in a particular statement
 following a call to sqlite3_step"
@@ -165,7 +161,7 @@ following a call to sqlite3_step"
 
 (defmethod load-value SQLITE_TEXT [statement column]
   (let [size (sqlite3_column_bytes (deref-ptr statement) column)]
-    (read-n-chars (sqlite3_column_text (deref-ptr statement) column) size)))
+    (sqlite3_column_text (deref-ptr statement) column)))
 
 (defmethod load-value SQLITE_INTEGER [statement column]
   (sqlite3_column_int64 (deref-ptr statement) column))
