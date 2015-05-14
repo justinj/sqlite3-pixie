@@ -85,16 +85,19 @@
 ;                                       [:score     :float])))
 
 (t/deftest throws-on-too-many-params
+  (create-table)
   (t/assert-throws?
     (sqlite/with-connection db-name [conn]
       (sqlite/query conn "SELECT name FROM ssbm_players WHERE name = 'PPMD'" "PPMD"))))
 
 (t/deftest throws-on-not-enough-params
+  (create-table)
   (t/assert-throws?
     (sqlite/with-connection db-name [conn]
       (sqlite/query conn "SELECT name FROM ssbm_players WHERE name = ?"))))
 
 (t/deftest throws-on-opening-invalid-filename
+  (create-table)
   (t/assert-throws?
     RuntimeException
     "Sqlite Error"
