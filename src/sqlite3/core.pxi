@@ -116,6 +116,34 @@
 (defn- deref-ptr [ptr]
   (ffi/unpack ptr 0 CVoidP))
 
+(defmulti
+  ^{:doc "Extracts the value for the specified column in a particular statement
+following a call to sqlite3_step"
+    :private true}
+  load-value #(sqlite3_column_type (deref-ptr %1) %2))
+
+(defmethod load-value SQLITE_TEXT [statement column]
+  (let [size (sqlite3_column_bytes (deref-ptr statement) column)]
+    (sqlite3_column_text (deref-ptr statement) column)))
+
+(defmethod load-value SQLITE_INTEGER [statement column]
+  (sqlite3_column_int64 (deref-ptr statement) column))
+
+(defmethod load-value SQLITE_FLOAT [statement column]
+  (sqlite3_column_double (deref-ptr statement) column))
+
+(defn- get-row [statement]
+  "Get a seq of all the column values for a row after a call to sqlite3_step"
+  (for [i (range 0 (sqlite3_column_count (deref-ptr statement)))]
+    (load-value statement i)))
+
+(defn- reduce-prepared-statement [statement f init]
+  (loop [result init]
+    (let [step-value (sqlite3_step (deref-ptr statement))]
+      (cond
+        (= step-value SQLITE_ROW) (recur (f result (get-row statement)))
+        (= step-value SQLITE_DONE) result))))
+
 (defn prepare-query [conn query args]
   (let [statement (new-ptr)]
     (sqlite3_prepare_v2
@@ -153,55 +181,18 @@
   [statement column value]
   (sqlite3_bind_double (deref-ptr statement) column value))
 
-(defmulti
-  ^{:doc "Extracts the value for the specified column in a particular statement
-following a call to sqlite3_step"
-    :private true}
-  load-value #(sqlite3_column_type (deref-ptr %1) %2))
-
-(defmethod load-value SQLITE_TEXT [statement column]
-  (let [size (sqlite3_column_bytes (deref-ptr statement) column)]
-    (sqlite3_column_text (deref-ptr statement) column)))
-
-(defmethod load-value SQLITE_INTEGER [statement column]
-  (sqlite3_column_int64 (deref-ptr statement) column))
-
-(defmethod load-value SQLITE_FLOAT [statement column]
-  (sqlite3_column_double (deref-ptr statement) column))
-
-
-(defn- get-row [conn statement]
-  "Get a seq of all the column values for a row after a call to sqlite3_step"
-  (for [i (range 0 (sqlite3_column_count (deref-ptr statement)))]
-    (load-value statement i)))
-
-(defn- run-prepared-statement [conn statement]
-  (loop [result []]
-    (let [step-value (sqlite3_step (deref-ptr statement))]
-      (cond
-        (= step-value SQLITE_ROW) (recur (conj result (get-row conn statement)))
-        (= step-value SQLITE_DONE) result))))
+(defn- run-prepared-statement [statement]
+  (reduce-prepared-statement statement conj []))
 
 (defn- get-column-names [statement]
   (let [num-cols (sqlite3_column_count (deref-ptr statement))]
     (map keyword
          (map #(sqlite3_column_name (deref-ptr statement) %) (range 0 num-cols)))))
 
-; TODO: this should maybe go in stdlib
-(defn zipmap [as bs]
-  (loop [m {}
-         as as
-         bs bs]
-    (cond (empty? as) m
-          (empty? bs) m
-          :else (recur (assoc m (first as) (first bs))
-                       (rest as)
-                       (rest bs)))))
-
 ; TODO: we should make sure the connection is valid
 (defn query [conn query & args]
   (let [statement (prepare-query conn query args)
-        rows (run-prepared-statement conn statement)
+        rows (run-prepared-statement statement)
         cols (vec (get-column-names statement))]
     (sqlite3_finalize (deref-ptr statement))
     (ffi/dispose! statement)
